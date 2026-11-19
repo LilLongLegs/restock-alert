@@ -1,0 +1,55 @@
+name: Restock check
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check 2XL stock
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TEST_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.request
+
+          BASE = "https://godzilla.com"
+          HANDLE = "godzilla-minus-zero-black-type-i-denim-jacket"
+          VARIANT = 55719070236977
+          TOPIC = os.environ["NTFY_TOPIC"]
+          TEST = os.environ.get("TEST_RUN") == "true"
+
+          def notify(title, message, priority="default", click=None):
+              headers = {"Title": title, "Priority": priority}
+              if click:
+                  headers["Click"] = click
+              req = urllib.request.Request(
+                  "https://ntfy.sh/" + TOPIC,
+                  data=message.encode("utf-8"),
+                  headers=headers,
+                  method="POST",
+              )
+              urllib.request.urlopen(req, timeout=20)
+
+          try:
+              url = f"{BASE}/products/{HANDLE}.js?t={int(time.time())}"
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              data = json.load(urllib.request.urlopen(req, timeout=20))
+              variant = next(v for v in data["variants"] if v["id"] == VARIANT)
+              available = variant["available"]
+          except Exception as e:
+              if TEST:
+                  notify("Restock check FAILED", "Could not read the store page: " + str(e))
+              print("Check failed:", e)
+              sys.exit(1)
+
+          print("2XL available:", available)
+          if available:
+              notify("2XL JACKET IN STOCK", "Tap to add it to your cart now!", "urgent", f"{BASE}/cart/{VARIANT}:1")
+          elif TEST:
+              notify("Restock monitor works", "Test OK. The 2XL is currently sold out. This is what a real alert will sound like.", "urgent")
+          PY
